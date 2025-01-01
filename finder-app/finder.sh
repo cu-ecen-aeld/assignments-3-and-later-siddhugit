@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 usage(){
     printf "Usage: ./finder.sh <dir_name> <search_string>\n"
