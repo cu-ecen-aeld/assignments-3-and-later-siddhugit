@@ -21,9 +21,10 @@ static const int BUFF_SIZE = 1024;
 static int DATA_FILE_FD = -1;
 static int SERVER_SOCK_FD = -1;
 
-static void termination_handler() {
+static void termination_handler(int signum) {
     close(SERVER_SOCK_FD);
     close(DATA_FILE_FD);
+    syslog(LOG_INFO, "Caught signal %d, exiting ", signum);
 }
 
 static void regSigHandler() {
