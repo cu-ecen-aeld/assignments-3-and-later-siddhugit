@@ -24,6 +24,7 @@ static int SERVER_SOCK_FD = -1;
 static void termination_handler(int signum) {
     close(SERVER_SOCK_FD);
     close(DATA_FILE_FD);
+    remove(DATA_FILE_NAME);
     syslog(LOG_INFO, "Caught signal %d, exiting ", signum);
 }
 
