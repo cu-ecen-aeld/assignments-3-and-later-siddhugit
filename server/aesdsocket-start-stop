@@ -1,0 +1,40 @@
+#!/bin/bash
+
+aesdStart(){
+    start-stop-daemon -S -n aesdsocket -a /usr/bin/aesdsocket -- -d
+}
+
+aesdStop(){
+     start-stop-daemon -K -n aesdsocket
+}
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 [start|stop|restart]"
+    exit 1
+fi
+
+command=$1
+
+if [ ${command} == "start" ]; then
+    echo "starting aesdsocket"
+    aesdStart
+    echo "aesdsocket started"
+elif [ ${command} == "stop" ]; then
+    echo "stopping aesdsocket"
+    aesdStop
+    echo "aesdsocket stopped"
+elif [ ${command} == "restart" ]; then
+    echo "starting aesdsocket"
+    aesdStart
+    echo "aesdsocket stopped"
+    
+    sleep 1
+
+    echo "stopping aesdsocket"
+    aesdStop
+    echo "aesdsocket stopped"
+else 
+    exit 1
+fi
+
+exit 0
