@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 aesdStart(){
     start-stop-daemon -S -n aesdsocket -a /usr/bin/aesdsocket -- -d
