@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,6 +15,8 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#include "LinkedList.h"
+
 static const char *AESD_PORT = "9000";
 static const int AESD_CONN_BACKLOG = 10;
 static const char *DATA_FILE_NAME = "/var/tmp/aesdsocketdata";
@@ -21,10 +24,52 @@ static const int BUFF_SIZE = 1024;
 static int DATA_FILE_FD = -1;
 static int SERVER_SOCK_FD = -1;
 
+struct Node *g_NodeList = NULL;
+
+pthread_mutex_t g_data_mutex;
+
+static void timerFunc(union sigval sv) {
+    time_t now;
+    struct tm *tm_info;
+    char timestamp[100];
+
+    time(&now);
+    tm_info = localtime(&now);
+    int size = strftime(timestamp, sizeof(timestamp),
+                        "timestamp:%a, %d %b %Y %H:%M:%S %z\n", tm_info);
+
+    pthread_mutex_lock(&g_data_mutex);
+    write(DATA_FILE_FD, timestamp, size);
+    pthread_mutex_unlock(&g_data_mutex);
+}
+
+void startTimer(int firstRun, int interval)  // both arguments in seconds
+{
+    struct sigevent sev;
+    sev.sigev_notify = SIGEV_THREAD;
+    sev.sigev_notify_function = timerFunc;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    sev.sigev_notify_attributes = &attr;  // nullptr;
+    sev.sigev_value.sival_ptr = NULL;
+    timer_t timerId;
+    timer_create(CLOCK_REALTIME, &sev, &timerId);
+
+    struct itimerspec ts;
+    ts.it_value.tv_sec = firstRun;  // parametrize
+    ts.it_value.tv_nsec = 0;
+
+    ts.it_interval.tv_sec = interval;  // parametrize
+    ts.it_interval.tv_nsec = 0;
+    timer_settime(timerId, 0, &ts, NULL);
+}
+
 static void termination_handler(int signum) {
     close(SERVER_SOCK_FD);
     close(DATA_FILE_FD);
     remove(DATA_FILE_NAME);
+    destroyList(&g_NodeList);
     syslog(LOG_INFO, "Caught signal %d, exiting ", signum);
 }
 
@@ -153,8 +198,7 @@ static int inetListen(const char *service, int backlog, socklen_t *addrlen,
 }
 
 static int makeServer(bool isDeamon) {
-    socklen_t len;
-    int listenFd = inetListen(AESD_PORT, AESD_CONN_BACKLOG, &len, isDeamon);
+    int listenFd = inetListen(AESD_PORT, AESD_CONN_BACKLOG, NULL, isDeamon);
     return listenFd;
 }
 
@@ -177,22 +221,42 @@ static void sendData(int cfd) {
     }
 }
 
-static void processConn(int cfd) {
+void *processConnAsync(void *ptr) {
+    struct Node *newNode = (struct Node *)ptr;
+    int cfd = newNode->data.cfd;
     char buff;
+    pthread_mutex_lock(&g_data_mutex);
     while (recv(cfd, &buff, 1, 0) > 0) {
         appendData(buff);
         if (buff == '\n') {
             break;
         }
     }
+    pthread_mutex_unlock(&g_data_mutex);
     sendData(cfd);
     close(cfd);
+    newNode->data.isDone = true;
+    return ptr;
+}
+
+static void processConn(int cfd) {
+    struct NodeData nodeData;
+    nodeData.cfd = cfd;
+    nodeData.isDone = false;
+
+    struct Node *newNode = appendNode(&g_NodeList, nodeData);
+    pthread_t thread;
+    pthread_create(&thread, NULL, processConnAsync, (void *)newNode);
+    newNode->data.tid = thread;
+    joinDoneThread(&g_NodeList);
 }
 
 int main(int argc, char *argv[]) {
     openlog(argv[0], LOG_PID | LOG_CONS | LOG_NOWAIT, LOG_USER);
 
     regSigHandler();
+
+    pthread_mutex_init(&g_data_mutex, NULL);
 
     int dataFd = open(DATA_FILE_NAME, O_WRONLY | O_TRUNC | O_CREAT, 0644);
     if (dataFd < 0) {
@@ -205,6 +269,7 @@ int main(int argc, char *argv[]) {
 
     int listenFd = makeServer(isDeamon);
     if (listenFd != -1) {
+        startTimer(1, 10);
         SERVER_SOCK_FD = listenFd;
         struct sockaddr_in connAddr;
         int clientLen = sizeof(struct sockaddr);
