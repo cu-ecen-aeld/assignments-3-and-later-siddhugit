@@ -1,5 +1,5 @@
 CC ?= $(CROSS_COMPILE)gcc
-CFLAGS= -g -Wall -Werror -I. -lpthread 
+CFLAGS= -g -Wall -Werror -Wno-unused-result -Wno-maybe-uninitialized -I. -lpthread 
 
 all: aesdsocket_build
 
